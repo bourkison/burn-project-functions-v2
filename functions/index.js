@@ -112,20 +112,6 @@ exports.aggregateCommentLikes = functions.region("australia-southeast1").firesto
         return docRef.update(data);
     })
 })
-
-
-// path.get().then(doc => {
-    //     if (!doc.exists) {
-    //         console.log("No such document.")
-    //         return res.send("Not found")
-    //     }
-
-    //     if (doc.data().createdBy != context.auth.uid) {
-    //         return res.send("Insufficient permissions.");
-    //     }
-
-    //     console.log("Document found. Now deleting.");
-// })
     
 // Deleting Exercises and Workouts is too intensive on the client end (as all comments, 
 // likes and follows must be deleted too), so we do it on server side.
@@ -133,8 +119,72 @@ exports.deleteExercise = functions.region("australia-southeast1").runWith({ time
     .https.onCall((data, context) => {
         // TODO: Add auth here.
         const path = data.path;
-        console.log(path.fullPath);
-        console.log("CALLED")
+        const docId = path.split("/")[path.split("/").length - 1];
+
+        const docRef = admin.firestore().collection("exercises").doc(docId);
+        
+        docRef.get().then(doc => {
+            if (!doc.exists) {
+                console.log("Attempting to delete document that does not exist.");
+                return res.send("Document does not exist");
+            }
+
+            if (doc.data().createdBy.id != context.auth.uid) {
+                console.log("Unauthorized user attempted to delete document:", docId, context.auth.uid);
+                return res.send("Insufficient permissions.");
+            }
+            
+
+            // Delete likes from User's collection.
+            docRef.collection("likes").get().then(likeSnapshot => {
+                likeSnapshot.forEach(like => {
+                    const userId = like.data().createdBy.id;
+                    admin.firestore().collection("users").doc(userId).collection("likes").doc(like.id).delete().then(() => {
+                        console.log("Deleted like from user collection.");
+                    }).catch(e => {
+                        console.log("Error deleting like document from user's collection.", e);
+                    })
+                })
+            }).catch(e => {
+                console.log("Error retrieving likes from exercise document.", e);
+            })
+
+            // Delete comments from User's collection.
+            docRef.collection("comments").get().then(commentSnapshot => {
+                commentSnapshot.forEach(comment => {
+                    const userId = comment.data().createdBy.id;
+                    admin.firestore().collection("users").doc(userId).collection("comments").doc(comment.id).delete().then(() => {
+                        console.log("Deleted comment from user collection.");
+                    }).catch(e => {
+                        console.log("Error deleting comment document from user's collection.", e);
+                    })
+                })
+            }).catch(e => {
+                console.log("Error retrieving comments from exercise document.", e);
+            })
+
+            // Delete follows from User's collection.
+            docRef.collection("follows").get().then(followSnapshot => {
+                followSnapshot.forEach(follow => {
+                    const userId = follow.data().createdBy.id;
+                    admin.firestore().collection("users").doc(userId).collection("exercises").doc(follow.id).delete().then(() => {
+                        console.log("Deleted follow from user collection.");
+                    }).catch(e => {
+                        console.log("Error deleting follow document from user's collection.", e);
+                    })
+                })
+            }).catch(e => {
+                console.log("Error retrieving follows from exercise document.", e);
+            })
+
+            // Finally delete from User who created's exercises collection.
+            admin.firestore().collection("users").doc(context.auth.uid).collection("exercises").doc(doc.id).delete().then(() => {
+                console.log("Deleted exercise from created user's exercises.");
+            }).catch(e => {
+                console.log("Error deleting exercise from user who created's exercise collection.", e);
+            })
+
+        })
         
         return firebase_tools.firestore
             .delete(path, {
