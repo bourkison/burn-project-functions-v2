@@ -115,6 +115,7 @@ exports.aggregateCommentLikes = functions.region("australia-southeast1").firesto
     
 // Deleting Exercises and Workouts is too intensive on the client end (as all comments, 
 // likes and follows must be deleted too), so we do it on server side.
+// TODO: Delete comment likes from user's doc.
 exports.deleteExercise = functions.region("australia-southeast1").runWith({ timeoutSeconds: 540 })
     .https.onCall((data, context) => {
         // TODO: Add auth here.
@@ -126,12 +127,12 @@ exports.deleteExercise = functions.region("australia-southeast1").runWith({ time
         docRef.get().then(doc => {
             if (!doc.exists) {
                 console.log("Attempting to delete document that does not exist.");
-                return res.send("Document does not exist");
+                return res.status(500).send("Document does not exist");
             }
 
             if (doc.data().createdBy.id != context.auth.uid) {
                 console.log("Unauthorized user attempted to delete document:", docId, context.auth.uid);
-                return res.send("Insufficient permissions.");
+                return res.status(500).send("Insufficient permissions.");
             }
             
 
@@ -167,7 +168,7 @@ exports.deleteExercise = functions.region("australia-southeast1").runWith({ time
             docRef.collection("follows").get().then(followSnapshot => {
                 followSnapshot.forEach(follow => {
                     const userId = follow.data().createdBy.id;
-                    admin.firestore().collection("users").doc(userId).collection("exercises").doc(follow.id).delete().then(() => {
+                    admin.firestore().collection("users").doc(userId).collection("exercises").doc(doc.id).delete().then(() => {
                         console.log("Deleted follow from user collection.");
                     }).catch(e => {
                         console.log("Error deleting follow document from user's collection.", e);
