@@ -90,6 +90,84 @@ exports.aggregateExerciseComments = functions.region("australia-southeast1").fir
     })
 })
 
+exports.aggregateWorkoutLikes = functions.region("australia-southeast1").firestore
+    .document("workouts/{workoutId}/likes/{likeId}")
+    .onWrite((change, context) => {
+
+    const workoutId = context.params.workoutId;
+    const docRef = admin.firestore().collection("workouts").doc(workoutId);
+
+    return docRef.collection("likes")
+        .get()
+        .then(querySnapshot => {
+            const likeCount = querySnapshot.size;
+            const lastActivity = new Date();
+            const data = { likeCount, lastActivity };
+
+            return docRef.update(data);
+    })
+    .catch(e => {
+        console.log(e);
+    })
+})
+
+exports.aggregateWorkoutFollows = functions.region("australia-southeast1").firestore
+    .document("workouts/{workoutId}/follows/{followId}")
+    .onWrite((change, context) => {
+
+    const workoutId = context.params.workoutId;
+    const docRef = admin.firestore().collection("workouts").doc(workoutId);
+
+    return docRef.collection("follows")
+        .get()
+        .then(querySnapshot => {
+
+        const followCount = querySnapshot.size;
+        const lastActivity = new Date();
+
+        const data = { followCount, lastActivity }
+
+        return docRef.update(data);
+    })
+    .catch(e => {
+        console.log(e);
+    })
+})
+
+exports.aggregateWorkoutComments = functions.region("australia-southeast1").firestore
+    .document("workouts/{workoutId}/comments/{commentId}")
+    .onWrite((change, context) => {
+    
+    const workoutId = context.params.workoutId;
+    const docRef = admin.firestore().collection("workouts").doc(workoutId);
+
+    return docRef.collection("workouts").orderBy("createdAt", "desc")
+        .get()
+        .then(querySnapshot => {
+        
+        const commentCount = querySnapshot.size;
+        const lastActivity = new Date();
+
+        const recentComments = [];
+
+        querySnapshot.forEach(doc => {
+            let d = doc.data();
+            d.id = doc.id;
+            recentComments.push(d);
+        })
+
+        recentComments.splice(5);
+
+        const data = { recentComments, commentCount, lastActivity };
+
+        return docRef.update(data);
+    })
+    .catch(e => {
+        console.log(e);
+    })
+})
+
+
 exports.aggregateCommentLikes = functions.region("australia-southeast1").firestore
     .document("{collectionId}/{documentId}/comments/{commentId}/likes/{likeId}")
     .onWrite((change, context) => {
