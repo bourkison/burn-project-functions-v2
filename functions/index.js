@@ -4,7 +4,10 @@ const admin = require("firebase-admin");
 
 const project = process.env.GCLOUD_PROJECT;
 const token = functions.config().ci_token;
-admin.initializeApp();
+
+admin.initializeApp({
+    storageBucket: "burn-project-f8493.appspot.com"
+});
 
 // Pulls all likes, counts, then pushes to exercise doc with the value under likeCount.
 exports.aggregateExerciseLikes = functions.region("australia-southeast1").firestore
@@ -141,7 +144,7 @@ exports.aggregateWorkoutComments = functions.region("australia-southeast1").fire
     const workoutId = context.params.workoutId;
     const docRef = admin.firestore().collection("workouts").doc(workoutId);
 
-    return docRef.collection("workouts").orderBy("createdAt", "desc")
+    return docRef.collection("comments").orderBy("createdAt", "desc")
         .get()
         .then(querySnapshot => {
         
@@ -221,7 +224,7 @@ exports.deleteExercise = functions.region("australia-southeast1").runWith({ time
                     admin.firestore().collection("users").doc(userId).collection("likes").doc(like.id).delete().then(() => {
                         console.log("Deleted like from user collection.");
                     }).catch(e => {
-                        console.log("Error deleting like document from user's collection.", e);
+                        console.warn("Error deleting like document from user's collection.", e);
                     })
                 })
             }).catch(e => {
@@ -235,7 +238,7 @@ exports.deleteExercise = functions.region("australia-southeast1").runWith({ time
                     admin.firestore().collection("users").doc(userId).collection("comments").doc(comment.id).delete().then(() => {
                         console.log("Deleted comment from user collection.");
                     }).catch(e => {
-                        console.log("Error deleting comment document from user's collection.", e);
+                        console.warn("Error deleting comment document from user's collection.", e);
                     })
                 })
             }).catch(e => {
@@ -249,18 +252,26 @@ exports.deleteExercise = functions.region("australia-southeast1").runWith({ time
                     admin.firestore().collection("users").doc(userId).collection("exercises").doc(doc.id).delete().then(() => {
                         console.log("Deleted follow from user collection.");
                     }).catch(e => {
-                        console.log("Error deleting follow document from user's collection.", e);
+                        console.warn("Error deleting follow document from user's collection.", e);
                     })
                 })
             }).catch(e => {
                 console.log("Error retrieving follows from exercise document.", e);
             })
 
+            // Delete images from the storage.
+            const storagePath = "exercises/" + docId;
+            admin.storage().bucket().deleteFiles({ prefix: storagePath }).then(() => {
+                console.log("Deleted exercise data from storage.");
+            }).catch(e => {
+                console.warn("Error deleting data from storage.");
+            });
+
             // Finally delete from User who created's exercises collection.
             admin.firestore().collection("users").doc(context.auth.uid).collection("exercises").doc(doc.id).delete().then(() => {
                 console.log("Deleted exercise from created user's exercises.");
             }).catch(e => {
-                console.log("Error deleting exercise from user who created's exercise collection.", e);
+                console.warn("Error deleting exercise from user who created's exercise collection.", e);
             })
 
         })
