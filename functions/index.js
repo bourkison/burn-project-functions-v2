@@ -196,14 +196,15 @@ exports.aggregateCommentLikes = functions.region("australia-southeast1").firesto
     
 // Deleting Exercises and Workouts is too intensive on the client end (as all comments, 
 // likes and follows must be deleted too), so we do it on server side.
-// TODO: Delete comment likes from user's doc.
-exports.deleteExercise = functions.region("australia-southeast1").runWith({ timeoutSeconds: 540 })
+// TODO: Delete comment likes from user's doc. Delete exercise from relevant workouts.
+exports.deleteCollection = functions.region("australia-southeast1").runWith({ timeoutSeconds: 540 })
     .https.onCall((data, context) => {
         // TODO: Add auth here.
         const path = data.path;
+        const collectionName = path.split("/")[0];
         const docId = path.split("/")[path.split("/").length - 1];
 
-        const docRef = admin.firestore().collection("exercises").doc(docId);
+        const docRef = admin.firestore().collection(collectionName).doc(docId);
         
         docRef.get().then(doc => {
             if (!doc.exists) {
@@ -249,7 +250,7 @@ exports.deleteExercise = functions.region("australia-southeast1").runWith({ time
             docRef.collection("follows").get().then(followSnapshot => {
                 followSnapshot.forEach(follow => {
                     const userId = follow.data().createdBy.id;
-                    admin.firestore().collection("users").doc(userId).collection("exercises").doc(doc.id).delete().then(() => {
+                    admin.firestore().collection("users").doc(userId).collection(collectionName).doc(doc.id).delete().then(() => {
                         console.log("Deleted follow from user collection.");
                     }).catch(e => {
                         console.warn("Error deleting follow document from user's collection.", e);
@@ -259,19 +260,21 @@ exports.deleteExercise = functions.region("australia-southeast1").runWith({ time
                 console.log("Error retrieving follows from exercise document.", e);
             })
 
-            // Delete images from the storage.
-            const storagePath = "exercises/" + docId;
-            admin.storage().bucket().deleteFiles({ prefix: storagePath }).then(() => {
-                console.log("Deleted exercise data from storage.");
-            }).catch(e => {
-                console.warn("Error deleting data from storage.");
-            });
+            // Delete images from the storage IF we are in exercises.
+            if (collectionName === "exercises") {
+                const storagePath = "exercises/" + docId;
+                admin.storage().bucket().deleteFiles({ prefix: storagePath }).then(() => {
+                    console.log("Deleted exercise data from storage.");
+                }).catch(e => {
+                    console.warn("Error deleting data from storage.");
+                });
+            }
 
             // Finally delete from User who created's exercises collection.
-            admin.firestore().collection("users").doc(context.auth.uid).collection("exercises").doc(doc.id).delete().then(() => {
+            admin.firestore().collection("users").doc(context.auth.uid).collection(collectionName).doc(doc.id).delete().then(() => {
                 console.log("Deleted exercise from created user's exercises.");
             }).catch(e => {
-                console.warn("Error deleting exercise from user who created's exercise collection.", e);
+                console.warn("Error deleting exercise from user who created's " + collectionName + " collection.", e);
             })
 
         })
