@@ -346,27 +346,6 @@ exports.deleteCollection = functions.region("australia-southeast1").runWith({ ti
 });
 
 
-exports.pushPostToFollowersFeed = functions.region("australia-southeast1").firestore
-    .document("posts/{documentId}")
-    .onWrite((change, context) => {
-
-    const userId = context.auth.uid;
-    const postId = context.params.documentId;
-
-    const userDocRef = admin.firestore().collection("users").doc(userId);
-
-    // First retrieve all followers of this user.
-    userDocRef.collection("followers").get().then(querySnapshot => {
-        // Now loop through each follower and add this post to their feed.
-        querySnapshot.forEach(user => {
-            let followerDocRef = admin.firestore().collection("users").doc(user.id);
-
-            followerDocRef.update({ feed: firebase.firestore.FieldValue.arrayUnion(postId) });
-        })
-    })
-})
-
-
 exports.buildFeed = functions.region("australia-southeast1").runWith({ timeoutSeconds: 540 })
     .https.onCall((data, context) => {
 
