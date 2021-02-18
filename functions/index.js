@@ -1,6 +1,7 @@
 const functions = require("firebase-functions");
 const firebase_tools = require("firebase-tools");
 const admin = require("firebase-admin");
+// const algoliasearch = require("algoliasearch");
 
 const project = process.env.GCLOUD_PROJECT;
 const token = functions.config().ci_token;
@@ -254,7 +255,7 @@ exports.aggregateCommentLikes = functions.region("australia-southeast1").firesto
 // likes and follows must be deleted too), so we do it on server side.
 // TODO: Delete comment likes from user's doc. Delete exercise from relevant workouts.
 exports.deleteCollection = functions.region("australia-southeast1").runWith({ timeoutSeconds: 540 })
-    .https.onCall((data, context) => {
+    .https.onCall(async (data, context) => {
         // TODO: Add auth here.
         const path = data.path;
         const collectionName = path.split("/")[0];
@@ -343,3 +344,72 @@ exports.deleteCollection = functions.region("australia-southeast1").runWith({ ti
                 yes: true
         }).then(() => ({ result: "Deleted successfully." }));
 });
+
+
+exports.pushPostToFollowersFeed = functions.region("australia-southeast1").firestore
+    .document("posts/{documentId}")
+    .onWrite((change, context) => {
+
+    const userId = context.auth.uid;
+    const postId = context.params.documentId;
+
+    const userDocRef = admin.firestore().collection("users").doc(userId);
+
+    // First retrieve all followers of this user.
+    userDocRef.collection("followers").get().then(querySnapshot => {
+        // Now loop through each follower and add this post to their feed.
+        querySnapshot.forEach(user => {
+            let followerDocRef = admin.firestore().collection("users").doc(user.id);
+
+            followerDocRef.update({ feed: firebase.firestore.FieldValue.arrayUnion(postId) });
+        })
+    })
+})
+
+
+exports.buildFeed = functions.region("australia-southeast1").runWith({ timeoutSeconds: 540 })
+    .https.onCall((data, context) => {
+
+    const userId = context.auth.uid;
+    const userDocRef = admin.firestore().collection("users").doc(userId);
+
+    return userDocRef.collection("following").get()
+    .then(followingSnapshot => {
+        let promises = [];
+
+        // Begin download of all following users.
+        followingSnapshot.forEach(following => {
+            const followingId = following.id;
+            promises.push(admin.firestore().collection("users").doc(followingId).collection("posts").get())
+        })
+
+        // Also download users posts.
+        promises.push(admin.firestore().collection("users").doc(userId).collection("posts").get())
+
+        // Return promises.
+        return Promise.all(promises);
+
+    }).then(postSnapshots => {
+        let temp = [];
+        let posts = [];
+        postSnapshots.forEach(postSnapshot => {
+            postSnapshot.forEach(post => {
+                temp.push({ id: post.id, data: post.data()})
+            })
+        })
+
+        temp.sort(function(a, b) { return b.data.createdAt.seconds - a.data.createdAt.seconds })
+
+        temp.forEach(post => {
+            posts.push(post.id);
+        })
+
+        return { posts }
+    }).catch(error => {
+        console.error(error);
+        throw new functions.https.HttpsError('failed-precondition', error);
+    })
+})
+
+
+// ALGOLIA
