@@ -355,6 +355,52 @@ exports.deleteCollection = functions.region("australia-southeast1").runWith({ ti
         }).then(() => ({ result: "Deleted successfully." }));
 });
 
+
+exports.createLike = functions.region("australia-southeast1").runWith({ timeoutSeconds: 30 })
+    .https.onCall((data, context) => {
+
+    const userId = context.auth.uid;
+    const user = data.user;
+    // As like can be from any collection (posts, workouts, exercises), we must pass through
+    // the collection as well as the document.
+    const pageType = data.type;
+    const collectionRef = admin.firestore().collection(data.collection).doc(data.docId);
+
+    const timestamp = new Date();
+    const likeId = generateId(16);
+    const batch = admin.firestore().batch();
+
+    // Add like in relevant document.
+    batch.set(collectionRef.collection("likes").doc(likeId), { 
+        createdAt: timestamp,
+        createdBy: { 
+            id: userId,
+            username: user.username,
+            profilePhoto: user.profilePhotoUrl
+        }
+    });
+
+    // Then in user document.
+    batch.set(admin.firestore().collection("users").doc(userId).collection("likes").doc(likeId), { 
+        createdAt: timestamp,
+        id: data.docId,
+        type: pageType
+    });
+
+    // Then increment the counter.
+    batch.set(collectionRef.collection("likeCounters").doc((Math.floor(Math.random() * 5)).toString()), {
+        count: admin.firestore.FieldValue.increment(1)
+    });
+
+    // Then commit this batch.
+    return batch.commit().then(() => {
+        return { id: likeId }
+    })
+
+})
+
+
+
 exports.createWorkout = functions.region("australia-southeast1").runWith({ timeoutSeconds: 30 })
     .https.onCall((data, context) => {
 
@@ -383,21 +429,28 @@ exports.createWorkout = functions.region("australia-southeast1").runWith({ timeo
     }
     workoutId += generateId(16 - workoutId.length);
 
-    // First create the document in the workouts collection.
-    return admin.firestore().collection("workouts").doc(workoutId).set(workoutForm)
-    .then(() => {
-        let workoutPayload = { createdAt: workoutForm.createdAt, isFollow: false };
-        // Then create in users collection
-        return admin.firestore().collection("users").doc(userId).collection("workouts").doc(workoutId).set(workoutPayload)
+    const batch = admin.firestore().batch();
+
+    // First create in workouts collection.
+    batch.set(admin.firestore().collection("workouts").doc(workoutId), workoutForm);
+
+    // Then create in user document.
+    batch.set(admin.firestore().collection("users").doc(userId).collection("workouts").doc(workoutId), {
+        createdAt: workoutForm.createdAt,
+        isFollow: false
+    });
+
+    // Now create distributed counter in workouts collection.
+    for (let i = 0; i < 5; i ++) {
+        const shardRef = admin.firestore().collection("workouts").doc(workoutId).collection("likeCounters").doc(i.toString()); 
+        batch.set(shardRef, { count: 0 });
+    }
+
+    // Commit the batch.
+    return batch.commit().then(() => {
+        return { id: workoutId };
     })
-    .then(() => {
-        console.log("Created workout at:", workoutId);
-        return { id: workoutId }
-    })
-    .catch(e => {
-        console.error("Error creating workout.", e, "Workout id:", workoutId);
-        throw new functions.https.HttpsError("unknown", "Error creating workout.");
-    })
+
 })
 
 
