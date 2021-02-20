@@ -333,8 +333,8 @@ exports.createWorkout = functions.region("australia-southeast1").runWith({ timeo
 
     // Now create distributed counter in workouts collection.
     for (let i = 0; i < numShards; i ++) {
-        const shardRef = admin.firestore().collection("workouts").doc(workoutId).collection("likeCounters").doc(i.toString()); 
-        batch.set(shardRef, { count: 0 });
+        const shardRef = admin.firestore().collection("workouts").doc(workoutId).collection("counters").doc(i.toString()); 
+        batch.set(shardRef, { likeCount: 0, commentCount: 0, followCount: 0 });
     }
 
     // Commit the batch.
@@ -397,7 +397,7 @@ exports.createExercise = functions.region("australia-southeast1").runWith({ time
     // Now create distributed counter in exercises collection.
     for (let i = 0; i < numShards; i++) {
         const shardRef = admin.firestore().collection("exercises").doc(exerciseId).collection("likeCounters").doc(i.toString());
-        batch.set(shardRef, { count: 0 });
+        batch.set(shardRef, { likeCount: 0, commentCount: 0, followCount: 0 });
     }
 
     return batch.commit()
@@ -443,7 +443,7 @@ exports.createPost = functions.region("australia-southeast1").runWith({ timeoutS
 
     for (let i = 0; i < numShards; i++) {
         const shardRef = admin.firestore().collection("posts").doc(postId).collection("likeCounters").doc(i.toString());
-        batch.set(shardRef, { counter: 0 });
+        batch.set(shardRef, { likeCount: 0, commentCount: 0 });
     }
 
     return batch.commit()
