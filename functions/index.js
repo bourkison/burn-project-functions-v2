@@ -290,54 +290,6 @@ exports.deleteCollection = functions.region("australia-southeast1").runWith({ ti
 });
 
 
-exports.createLike = functions.region("australia-southeast1").runWith({ timeoutSeconds: 30 })
-    .https.onCall((data, context) => {
-
-    const userId = context.auth.uid;
-    const user = data.user;
-    // As like can be from any collection (posts, workouts, exercises), we must pass through
-    // the collection as well as the document.
-    const pageType = data.type;
-    const collectionRef = admin.firestore().collection(data.collection).doc(data.docId);
-
-    const timestamp = new Date();
-    const likeId = generateId(16);
-    const batch = admin.firestore().batch();
-
-    // Add like in relevant document.
-    batch.set(collectionRef.collection("likes").doc(likeId), { 
-        createdAt: timestamp,
-        createdBy: { 
-            id: userId,
-            username: user.username,
-            profilePhoto: user.profilePhotoUrl
-        }
-    });
-
-    // Then in user document.
-    batch.set(admin.firestore().collection("users").doc(userId).collection("likes").doc(likeId), { 
-        createdAt: timestamp,
-        id: data.docId,
-        type: pageType
-    });
-
-    // Then increment the counter.
-    batch.set(collectionRef.collection("likeCounters").doc((Math.floor(Math.random() * numShards)).toString()), {
-        count: admin.firestore.FieldValue.increment(1)
-    });
-
-    // Then commit this batch.
-    return batch.commit()
-    .then(() => {
-        return { id: likeId }
-    })
-    .catch(e => {
-        console.error("Error liking:", e, "page type:", pageType, "document ID:", data.docId, "like ID:", likeId);
-        throw new functions.https.HttpsError("unknown", "Error liking this document.");
-    })
-})
-
-
 
 exports.createWorkout = functions.region("australia-southeast1").runWith({ timeoutSeconds: 30 })
     .https.onCall((data, context) => {
