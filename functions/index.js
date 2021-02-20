@@ -450,6 +450,44 @@ exports.createExercise = functions.region("australia-southeast1").runWith({ time
 })
 
 
+exports.createPost = functions.region("australia-southeast1").runWith({ timeoutSeconds: 30 })
+    .https.onCall((data, context) => {
+
+    const postForm = data.postForm;
+    const user = data.user;
+    const userId = context.auth.uid;
+
+    if (!postForm.content) {
+        throw new functions.https.HttpsError("invalid-argument", "Post must have content");
+    }
+
+    postForm.createdBy = { id: userId, username: user.username, profilePhoto: user.profilePhotoUrl };
+    postForm.createdAt = new Date();
+    postForm.likeCount = 0;
+    postForm.recentComments = [];
+    postForm.commentCount = 0;
+
+    let postId;
+
+    // First upload to posts collection.
+    return admin.firestore().collection("posts").add(postForm)
+    .then(postRef => {
+        let postPayload = { createdAt: postForm.createdAt };
+        postId = postRef.id;
+        // Then upload to user collection.
+        return admin.firestore().collection("users").doc(userId).collection("posts").doc(postId).set(postPayload)
+    })
+    .then(() => {
+        console.log("Post created at:", postId)
+        return { id: postId };
+    })
+    .catch(e => {
+        console.error("Error creating post", e, "post Id:", postId);
+        throw new functions.https.HttpsError("unknown", "Error creating post");
+    })
+})
+
+
 exports.buildFeed = functions.region("australia-southeast1").runWith({ timeoutSeconds: 540 })
     .https.onCall((data, context) => {
 
