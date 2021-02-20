@@ -6,6 +6,8 @@ const admin = require("firebase-admin");
 const project = process.env.GCLOUD_PROJECT;
 const token = functions.config().ci_token;
 
+const numShards = 10;
+
 admin.initializeApp({
     storageBucket: "burn-project-f8493.appspot.com"
 });
@@ -19,30 +21,6 @@ let generateId = function(n) {
     }
     return id;
 }
-
-// Pulls all likes, counts, then pushes to exercise doc with the value under likeCount.
-exports.aggregateExerciseLikes = functions.region("australia-southeast1").firestore
-    .document("exercises/{exerciseId}/likes/{likeId}")
-    .onWrite((change, context) => {
-
-    const exerciseId = context.params.exerciseId;
-
-    const docRef = admin.firestore().collection("exercises").doc(exerciseId);
-
-    return docRef.collection("likes")
-        .get()
-        .then(querySnapshot => {
-        const likeCount = querySnapshot.size;
-        const lastActivity = new Date();
-
-        const data = { likeCount, lastActivity };
-
-        return docRef.update(data);
-    })
-    .catch(e => {
-        console.log(e);
-    })
-})
 
 // " " for follows.
 exports.aggregateExerciseFollows = functions.region("australia-southeast1").firestore
@@ -104,27 +82,6 @@ exports.aggregateExerciseComments = functions.region("australia-southeast1").fir
     })
 })
 
-exports.aggregateWorkoutLikes = functions.region("australia-southeast1").firestore
-    .document("workouts/{workoutId}/likes/{likeId}")
-    .onWrite((change, context) => {
-
-    const workoutId = context.params.workoutId;
-    const docRef = admin.firestore().collection("workouts").doc(workoutId);
-
-    return docRef.collection("likes")
-        .get()
-        .then(querySnapshot => {
-            const likeCount = querySnapshot.size;
-            const lastActivity = new Date();
-            const data = { likeCount, lastActivity };
-
-            return docRef.update(data);
-    })
-    .catch(e => {
-        console.log(e);
-    })
-})
-
 exports.aggregateWorkoutFollows = functions.region("australia-southeast1").firestore
     .document("workouts/{workoutId}/follows/{followId}")
     .onWrite((change, context) => {
@@ -180,29 +137,6 @@ exports.aggregateWorkoutComments = functions.region("australia-southeast1").fire
         console.log(e);
     })
 })
-
-
-exports.aggregatePostLikes = functions.region("australia-southeast1").firestore
-    .document("posts/{postId}/likes/{likeId}")
-    .onWrite((change, context) => {
-    
-    const postId = context.params.postId;
-    const docRef = admin.firestore().collection("posts").doc(postId);
-
-    return docRef.collection("likes")
-        .get()
-        .then(querySnapshot => {
-            const likeCount = querySnapshot.size;
-            const lastActivity = new Date();
-            const data = { likeCount, lastActivity };
-
-            return docRef.update(data)
-    })
-    .catch(e => {
-        console.log(e);
-    })
-})
-
 
 exports.aggregatePostComments = functions.region("australia-southeast1").firestore
     .document("posts/{postId}/comments/{commentId}")
@@ -388,15 +322,19 @@ exports.createLike = functions.region("australia-southeast1").runWith({ timeoutS
     });
 
     // Then increment the counter.
-    batch.set(collectionRef.collection("likeCounters").doc((Math.floor(Math.random() * 5)).toString()), {
+    batch.set(collectionRef.collection("likeCounters").doc((Math.floor(Math.random() * numShards)).toString()), {
         count: admin.firestore.FieldValue.increment(1)
     });
 
     // Then commit this batch.
-    return batch.commit().then(() => {
+    return batch.commit()
+    .then(() => {
         return { id: likeId }
     })
-
+    .catch(e => {
+        console.error("Error liking:", e, "page type:", pageType, "document ID:", data.docId, "like ID:", likeId);
+        throw new functions.https.HttpsError("unknown", "Error liking this document.");
+    })
 })
 
 
@@ -415,6 +353,7 @@ exports.createWorkout = functions.region("australia-southeast1").runWith({ timeo
     }
 
     workoutForm.createdAt = new Date();
+    workoutForm.lastActivity = workoutForm.createdAt;
     workoutForm.createdBy = { id: userId, username: user.username, profilePhoto: user.profilePhotoUrl };
     workoutForm.likeCount = 0;
     workoutForm.recentComments = [];
@@ -441,14 +380,20 @@ exports.createWorkout = functions.region("australia-southeast1").runWith({ timeo
     });
 
     // Now create distributed counter in workouts collection.
-    for (let i = 0; i < 5; i ++) {
+    for (let i = 0; i < numShards; i ++) {
         const shardRef = admin.firestore().collection("workouts").doc(workoutId).collection("likeCounters").doc(i.toString()); 
         batch.set(shardRef, { count: 0 });
     }
 
     // Commit the batch.
-    return batch.commit().then(() => {
+    return batch.commit()
+    .then(() => {
+        console.log("Workout created at:", workoutId);
         return { id: workoutId };
+    })
+    .catch(e => {
+        console.error("Error creating workout", e, "workout ID:", workoutId);
+        throw new functions.https.HttpsError("unknown", "Error creating workout");
     })
 
 })
@@ -464,6 +409,7 @@ exports.createExercise = functions.region("australia-southeast1").runWith({ time
     
     exerciseForm.createdBy = {id: userId, username: user.username, profilePhoto: user.profilePhotoUrl};
     exerciseForm.createdAt = new Date();
+    exerciseForm.lastActivity = exerciseForm.createdAt;
     exerciseForm.likeCount = 0;
     exerciseForm.recentComments = [];
     exerciseForm.commentCount = 0;
@@ -485,20 +431,31 @@ exports.createExercise = functions.region("australia-southeast1").runWith({ time
     }
     exerciseId += generateId(16 - exerciseId.length);
 
-    // Now upload the doc to exercises collection.
-    return admin.firestore().collection("exercises").doc(exerciseId).set(exerciseForm)
+    const batch = admin.firestore().batch();
+
+    // First upload to exercises collection.
+    batch.set(admin.firestore().collection("exercises").doc(exerciseId), exerciseForm);
+
+    // Now in users collection.
+    batch.set(admin.firestore().collection("users").doc(userId).collection("exercises").doc(exerciseId), {
+        createdAt: exerciseForm.createdAt,
+        isFollow: false
+    });
+
+    // Now create distributed counter in exercises collection.
+    for (let i = 0; i < numShards; i++) {
+        const shardRef = admin.firestore().collection("exercises").doc(exerciseId).collection("likeCounters").doc(i.toString());
+        batch.set(shardRef, { count: 0 });
+    }
+
+    return batch.commit()
     .then(() => {
-        let exercisePayload = { createdAt: exerciseForm.createdAt, isFollow: false };
-        // Now upload to users collection.
-        return admin.firestore().collection("users").doc(userId).collection("exercises").doc(exerciseId).set(exercisePayload)
-    })
-    .then(() => {
-        console.log("Created exercise at:", exerciseId);
+        console.log("Exercise created at:", exerciseId);
         return { id: exerciseId };
     })
     .catch(e => {
         console.error("Error creating exercise", e, "exercise ID:", exerciseId);
-        throw new functions.https.HttpsError("unknown", "Error creating exercise.");
+        throw new functions.https.HttpsError("unknown", "Error creating exercise");
     })
 })
 
@@ -520,22 +477,30 @@ exports.createPost = functions.region("australia-southeast1").runWith({ timeoutS
     postForm.recentComments = [];
     postForm.commentCount = 0;
 
-    let postId;
+    const postId = generateId(16);
+
+    const batch = admin.firestore().batch();
 
     // First upload to posts collection.
-    return admin.firestore().collection("posts").add(postForm)
-    .then(postRef => {
-        let postPayload = { createdAt: postForm.createdAt };
-        postId = postRef.id;
-        // Then upload to user collection.
-        return admin.firestore().collection("users").doc(userId).collection("posts").doc(postId).set(postPayload)
-    })
+    batch.set(admin.firestore().collection("posts").doc(postId), postForm);
+
+    // Then upload to user collection.
+    batch.set(admin.firestore().collection("users").doc(userId).collection("posts").doc(postId), {
+        createdAt: postForm.createdAt
+    });
+
+    for (let i = 0; i < numShards; i++) {
+        const shardRef = admin.firestore().collection("posts").doc(postId).collection("likeCounters").doc(i.toString());
+        batch.set(shardRef, { counter: 0 });
+    }
+
+    return batch.commit()
     .then(() => {
-        console.log("Post created at:", postId)
+        console.log("Post created at:", postId);
         return { id: postId };
     })
     .catch(e => {
-        console.error("Error creating post", e, "post Id:", postId);
+        console.error("Error creating post", e, "post ID:", postId);
         throw new functions.https.HttpsError("unknown", "Error creating post");
     })
 })
