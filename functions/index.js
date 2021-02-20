@@ -359,46 +359,94 @@ exports.createWorkout = functions.region("australia-southeast1").runWith({ timeo
     .https.onCall((data, context) => {
 
     const workoutForm = data.workoutForm;
+    const userId = context.auth.uid
     const user = data.user;
 
     // Check the workoutForm has been filled out correctly.
     if (workoutForm.exercises.length == 0) {
-        throw new functions.https.HttpsError("no-exercises", "No exercises included in workout!");
+        console.warn("Tried to upload workout without exercises");
+        throw new functions.https.HttpsError("invalid-argument", "No exercises included in workout!");
     }
 
     workoutForm.createdAt = new Date();
-    workoutForm.createdBy = { id: context.auth.uid, username: user.username, profilePhoto: user.profilePhotoUrl };
+    workoutForm.createdBy = { id: userId, username: user.username, profilePhoto: user.profilePhotoUrl };
     workoutForm.likeCount = 0;
     workoutForm.recentComments = [];
     workoutForm.commentCount = 0;
     workoutForm.followCount = 0;
 
-    console.log("WORKOUT FORM:", workoutForm.name, workoutForm.difficulty, workoutForm.description);
-
     // Build the ID.
-    let id = '';
-    id += workoutForm.name.replace(/[^A-Za-z0-9]/g, "").substring(0, 8).toLowerCase();
-    if (id.length > 0) {
-        id += '-';
+    let workoutId = '';
+    workoutId += workoutForm.name.replace(/[^A-Za-z0-9]/g, "").substring(0, 8).toLowerCase();
+    if (workoutId.length > 0) {
+        workoutId += '-';
     }
-    id += generateId(16 - id.length);
-
-    console.log("ID", id);
+    workoutId += generateworkoutId(16 - workoutId.length);
 
     // First create the document in the workouts collection.
-    return admin.firestore().collection("workouts").doc(id).set(workoutForm)
+    return admin.firestore().collection("workouts").doc(workoutId).set(workoutForm)
     .then(() => {
         let workoutPayload = { createdAt: workoutForm.createdAt, isFollow: false };
         // Then create in users collection
-        return admin.firestore().collection("users").doc(context.auth.uid).collection("workouts").doc(id).set(workoutPayload)
+        return admin.firestore().collection("users").doc(userId).collection("workouts").doc(workoutId).set(workoutPayload)
     })
     .then(() => {
-        return { id }
+        console.log("Created workout at:", workoutId);
+        return { workoutId }
     })
     .catch(e => {
-        console.error("Error creating workout.", e, "Workout ID:", id);
+        console.error("Error creating workout.", e, "Workout id:", workoutId);
+        throw new functions.https.HttpsError("unknown", "Error creating workout.");
+    })
+})
+
+
+
+exports.createExercise = functions.region("australia-southeast1").runWith({ timeoutSeconds: 30 })
+    .https.onCall((data, context) => {
+
+    const exerciseForm = data.exerciseForm;
+    const user = data.user;
+    const userId = context.auth.uid;
+    
+    exerciseForm.createdBy = {id: userId, username: user.username, profilePhoto: user.profilePhotoUrl};
+    exerciseForm.createdAt = new Date();
+    exerciseForm.likeCount = 0;
+    exerciseForm.recentComments = [];
+    exerciseForm.commentCount = 0;
+    exerciseForm.followCount = 0;
+
+    exerciseForm.suggestedSets.forEach (s => {
+        delete s.id;
+        s.measureAmount = Number(s.measureAmount);
     })
 
+    if (exerciseForm.imgPaths.length == 0) {
+        throw new functions.https.HttpsError("invalid-argument", "No images included.");
+    }
+
+    let exerciseId = '';
+    exerciseId += exerciseForm.name.replace(/[^A-Za-z0-9]/g, "").substring(0, 8).toLowerCase();
+    if (exerciseId.length > 0) {
+        exerciseId += '-';
+    }
+    exerciseId += generateId(16 - exerciseId.length);
+
+    // Now upload the doc to exercises collection.
+    admin.firestore().collection("exercises").doc(exerciseId).set(exerciseForm)
+    .then(() => {
+        let exercisePayload = { createdAt: exerciseForm.createdAt, isFollow: false };
+        // Now upload to users collection.
+        return admin.firestore().collection("users").doc(userId).collection("exercises").doc(exerciseId).set(exercisePayload)
+    })
+    .then(() => {
+        console.log("Created exercise at:", exerciseId);
+        return { exerciseId }
+    })
+    .catch(e => {
+        console.error("Error creating exercise", e, "exercise ID:", exerciseId);
+        throw new functions.https.HttpsError("unknown", "Error creating exercise.");
+    })
 })
 
 
