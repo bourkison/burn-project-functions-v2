@@ -22,31 +22,6 @@ let generateId = function(n) {
     return id;
 }
 
-// " " for follows.
-exports.aggregateExerciseFollows = functions.region("australia-southeast1").firestore
-    .document("exercises/{exerciseId}/follows/{followId}")
-    .onWrite((change, context) => {
-
-    const exerciseId = context.params.exerciseId;
-
-    const docRef = admin.firestore().collection("exercises").doc(exerciseId);
-
-    return docRef.collection("follows")
-        .get()
-        .then(querySnapshot => {
-        
-        const followCount = querySnapshot.size;
-        const lastActivity = new Date();
-
-        const data = { followCount, lastActivity }
-
-        return docRef.update(data);
-
-    })
-    .catch(e => {
-        console.log(e);
-    })
-})
 
 // Pulls all comments, counts, and saves 5 most recent to commentCount and recentComments.
 exports.aggregateExerciseComments = functions.region("australia-southeast1").firestore
@@ -82,28 +57,6 @@ exports.aggregateExerciseComments = functions.region("australia-southeast1").fir
     })
 })
 
-exports.aggregateWorkoutFollows = functions.region("australia-southeast1").firestore
-    .document("workouts/{workoutId}/follows/{followId}")
-    .onWrite((change, context) => {
-
-    const workoutId = context.params.workoutId;
-    const docRef = admin.firestore().collection("workouts").doc(workoutId);
-
-    return docRef.collection("follows")
-        .get()
-        .then(querySnapshot => {
-
-        const followCount = querySnapshot.size;
-        const lastActivity = new Date();
-
-        const data = { followCount, lastActivity }
-
-        return docRef.update(data);
-    })
-    .catch(e => {
-        console.log(e);
-    })
-})
 
 exports.aggregateWorkoutComments = functions.region("australia-southeast1").firestore
     .document("workouts/{workoutId}/comments/{commentId}")
@@ -307,10 +260,7 @@ exports.createWorkout = functions.region("australia-southeast1").runWith({ timeo
     workoutForm.createdAt = new Date();
     workoutForm.lastActivity = workoutForm.createdAt;
     workoutForm.createdBy = { id: userId, username: user.username, profilePhoto: user.profilePhotoUrl };
-    workoutForm.likeCount = 0;
     workoutForm.recentComments = [];
-    workoutForm.commentCount = 0;
-    workoutForm.followCount = 0;
 
     // Build the ID.
     let workoutId = '';
@@ -362,10 +312,7 @@ exports.createExercise = functions.region("australia-southeast1").runWith({ time
     exerciseForm.createdBy = {id: userId, username: user.username, profilePhoto: user.profilePhotoUrl};
     exerciseForm.createdAt = new Date();
     exerciseForm.lastActivity = exerciseForm.createdAt;
-    exerciseForm.likeCount = 0;
     exerciseForm.recentComments = [];
-    exerciseForm.commentCount = 0;
-    exerciseForm.followCount = 0;
 
     exerciseForm.suggestedSets.forEach (s => {
         delete s.id;
@@ -396,7 +343,7 @@ exports.createExercise = functions.region("australia-southeast1").runWith({ time
 
     // Now create distributed counter in exercises collection.
     for (let i = 0; i < numShards; i++) {
-        const shardRef = admin.firestore().collection("exercises").doc(exerciseId).collection("likeCounters").doc(i.toString());
+        const shardRef = admin.firestore().collection("exercises").doc(exerciseId).collection("counters").doc(i.toString());
         batch.set(shardRef, { likeCount: 0, commentCount: 0, followCount: 0 });
     }
 
@@ -425,9 +372,7 @@ exports.createPost = functions.region("australia-southeast1").runWith({ timeoutS
 
     postForm.createdBy = { id: userId, username: user.username, profilePhoto: user.profilePhotoUrl };
     postForm.createdAt = new Date();
-    postForm.likeCount = 0;
     postForm.recentComments = [];
-    postForm.commentCount = 0;
 
     const postId = generateId(16);
 
@@ -442,7 +387,7 @@ exports.createPost = functions.region("australia-southeast1").runWith({ timeoutS
     });
 
     for (let i = 0; i < numShards; i++) {
-        const shardRef = admin.firestore().collection("posts").doc(postId).collection("likeCounters").doc(i.toString());
+        const shardRef = admin.firestore().collection("posts").doc(postId).collection("counters").doc(i.toString());
         batch.set(shardRef, { likeCount: 0, commentCount: 0 });
     }
 
