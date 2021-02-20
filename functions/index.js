@@ -10,6 +10,16 @@ admin.initializeApp({
     storageBucket: "burn-project-f8493.appspot.com"
 });
 
+let generateId = function(n) {
+    let randomChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+    let id = '';
+    // 7 random characters
+    for (let i = 0; i < n; i++) {
+        id += randomChars.charAt(Math.floor(Math.random() * randomChars.length));
+    }
+    return id;
+}
+
 // Pulls all likes, counts, then pushes to exercise doc with the value under likeCount.
 exports.aggregateExerciseLikes = functions.region("australia-southeast1").firestore
     .document("exercises/{exerciseId}/likes/{likeId}")
@@ -345,6 +355,52 @@ exports.deleteCollection = functions.region("australia-southeast1").runWith({ ti
         }).then(() => ({ result: "Deleted successfully." }));
 });
 
+exports.createWorkout = functions.region("australia-southeast1").runWith({ timeoutSeconds: 30 })
+    .https.onCall((data, context) => {
+
+    const workoutForm = data.workoutForm;
+    const user = data.user;
+
+    // Check the workoutForm has been filled out correctly.
+    if (workoutForm.exercises.length == 0) {
+        throw new functions.https.HttpsError("no-exercises", "No exercises included in workout!");
+    }
+
+    workoutForm.createdAt = new Date();
+    workoutForm.createdBy = { id: context.auth.uid, username: user.username, profilePhoto: user.profilePhotoUrl };
+    workoutForm.likeCount = 0;
+    workoutForm.recentComments = [];
+    workoutForm.commentCount = 0;
+    workoutForm.followCount = 0;
+
+    console.log("WORKOUT FORM:", workoutForm.name, workoutForm.difficulty, workoutForm.description);
+
+    // Build the ID.
+    let id = '';
+    id += workoutForm.name.replace(/[^A-Za-z0-9]/g, "").substring(0, 8).toLowerCase();
+    if (id.length > 0) {
+        id += '-';
+    }
+    id += generateId(16 - id.length);
+
+    console.log("ID", id);
+
+    // First create the document in the workouts collection.
+    return admin.firestore().collection("workouts").doc(id).set(workoutForm)
+    .then(() => {
+        let workoutPayload = { createdAt: workoutForm.createdAt, isFollow: false };
+        // Then create in users collection
+        return admin.firestore().collection("users").doc(context.auth.uid).collection("workouts").doc(id).set(workoutPayload)
+    })
+    .then(() => {
+        return { id }
+    })
+    .catch(e => {
+        console.error("Error creating workout.", e, "Workout ID:", id);
+    })
+
+})
+
 
 exports.buildFeed = functions.region("australia-southeast1").runWith({ timeoutSeconds: 540 })
     .https.onCall((data, context) => {
@@ -368,7 +424,8 @@ exports.buildFeed = functions.region("australia-southeast1").runWith({ timeoutSe
         // Return promises.
         return Promise.all(promises);
 
-    }).then(postSnapshots => {
+    })
+    .then(postSnapshots => {
         let temp = [];
         let posts = [];
         postSnapshots.forEach(postSnapshot => {
@@ -384,7 +441,8 @@ exports.buildFeed = functions.region("australia-southeast1").runWith({ timeoutSe
         })
 
         return { posts }
-    }).catch(error => {
+    })
+    .catch(error => {
         console.error(error);
         throw new functions.https.HttpsError('failed-precondition', error);
     })
