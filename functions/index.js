@@ -381,7 +381,7 @@ exports.createWorkout = functions.region("australia-southeast1").runWith({ timeo
     if (workoutId.length > 0) {
         workoutId += '-';
     }
-    workoutId += generateworkoutId(16 - workoutId.length);
+    workoutId += generateId(16 - workoutId.length);
 
     // First create the document in the workouts collection.
     return admin.firestore().collection("workouts").doc(workoutId).set(workoutForm)
@@ -392,7 +392,7 @@ exports.createWorkout = functions.region("australia-southeast1").runWith({ timeo
     })
     .then(() => {
         console.log("Created workout at:", workoutId);
-        return { workoutId }
+        return { id: workoutId }
     })
     .catch(e => {
         console.error("Error creating workout.", e, "Workout id:", workoutId);
@@ -433,7 +433,7 @@ exports.createExercise = functions.region("australia-southeast1").runWith({ time
     exerciseId += generateId(16 - exerciseId.length);
 
     // Now upload the doc to exercises collection.
-    admin.firestore().collection("exercises").doc(exerciseId).set(exerciseForm)
+    return admin.firestore().collection("exercises").doc(exerciseId).set(exerciseForm)
     .then(() => {
         let exercisePayload = { createdAt: exerciseForm.createdAt, isFollow: false };
         // Now upload to users collection.
@@ -441,7 +441,7 @@ exports.createExercise = functions.region("australia-southeast1").runWith({ time
     })
     .then(() => {
         console.log("Created exercise at:", exerciseId);
-        return { exerciseId }
+        return { id: exerciseId };
     })
     .catch(e => {
         console.error("Error creating exercise", e, "exercise ID:", exerciseId);
