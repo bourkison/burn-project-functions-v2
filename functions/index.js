@@ -1,6 +1,7 @@
 const functions = require("firebase-functions");
 const firebase_tools = require("firebase-tools");
 const admin = require("firebase-admin");
+const { HttpsError } = require("firebase-functions/lib/providers/https");
 // const algoliasearch = require("algoliasearch");
 
 const project = process.env.GCLOUD_PROJECT;
@@ -90,6 +91,7 @@ exports.aggregateWorkoutComments = functions.region("australia-southeast1").fire
         console.log(e);
     })
 })
+
 
 exports.aggregatePostComments = functions.region("australia-southeast1").firestore
     .document("posts/{postId}/comments/{commentId}")
@@ -300,6 +302,35 @@ exports.createWorkout = functions.region("australia-southeast1").runWith({ timeo
 
 })
 
+
+
+exports.createUser = functions.region("australia-southeast1").runWith({ timeoutSeconds: 30 })
+    .https.onCall((data, context) => {
+
+    const userForm = data.userForm;
+    const userId = data.userId;
+
+    userForm.createdAt = new Date();
+    userForm.lastActivty = userForm.createdAt;
+
+    if (!userForm.username) {
+        throw new HttpsError("invalid-argument", "Must include a username.");
+    }
+
+    return admin.firestore().collection("users").where("username", "==", userForm.username).get()
+    .then(userSnapshot => {
+        if (userSnapshot.size == 0) {
+            return admin.firestore().collection("users").doc(userId).set(userForm)
+        } else {
+            // TODO, as user has already created the Auth user, we need to delete the one they have created.
+            // Can do that asynchronously.
+            throw new functions.https.HttpsError("invalid-argument", "Username not unique")
+        }
+    })
+    .then(() => {
+        return { userId }
+    })
+})
 
 
 exports.createExercise = functions.region("australia-southeast1").runWith({ timeoutSeconds: 30 })
