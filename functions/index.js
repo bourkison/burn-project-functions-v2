@@ -23,110 +23,6 @@ let generateId = function(n) {
     return id;
 }
 
-
-// Pulls all comments, counts, and saves 5 most recent to commentCount and recentComments.
-exports.aggregateExerciseComments = functions.region("australia-southeast1").firestore
-    .document("exercises/{exerciseId}/comments/{commentId}")
-    .onWrite((change, context) => {
-
-    const exerciseId = context.params.exerciseId;
-
-    const docRef = admin.firestore().collection("exercises").doc(exerciseId);
-
-    return docRef.collection("comments").orderBy("createdAt", "desc")
-        .get()
-        .then(querySnapshot => {
-        const commentCount = querySnapshot.size;
-        const lastActivity = new Date();
-
-        const recentComments = [];
-
-        querySnapshot.forEach(doc => {
-            let d = doc.data();
-            d.id = doc.id;
-            recentComments.push(d);
-        })
-
-        recentComments.splice(5);
-
-        const data = { recentComments, commentCount, lastActivity }
-
-        return docRef.update(data)
-    })
-    .catch(e => {
-        console.log(e);
-    })
-})
-
-
-exports.aggregateWorkoutComments = functions.region("australia-southeast1").firestore
-    .document("workouts/{workoutId}/comments/{commentId}")
-    .onWrite((change, context) => {
-    
-    const workoutId = context.params.workoutId;
-    const docRef = admin.firestore().collection("workouts").doc(workoutId);
-
-    return docRef.collection("comments").orderBy("createdAt", "desc")
-        .get()
-        .then(querySnapshot => {
-        
-        const commentCount = querySnapshot.size;
-        const lastActivity = new Date();
-
-        const recentComments = [];
-
-        querySnapshot.forEach(doc => {
-            let d = doc.data();
-            d.id = doc.id;
-            recentComments.push(d);
-        })
-
-        recentComments.splice(5);
-
-        const data = { recentComments, commentCount, lastActivity };
-
-        return docRef.update(data);
-    })
-    .catch(e => {
-        console.log(e);
-    })
-})
-
-
-exports.aggregatePostComments = functions.region("australia-southeast1").firestore
-    .document("posts/{postId}/comments/{commentId}")
-    .onWrite((change, context) => {
-
-    const postId = context.params.postId;
-    const docRef = admin.firestore().collection("posts").doc(postId);
-
-    return docRef.collection("comments").orderBy("createdAt", "desc")
-        .get()
-        .then(querySnapshot => {
-
-            const commentCount = querySnapshot.size;
-            const lastActivity = new Date();
-
-            const recentComments = [];
-
-            querySnapshot.forEach(doc => {
-                let d = doc.data();
-                d.id = doc.id;
-                recentComments.push(d);
-            })
-
-            recentComments.splice(5);
-
-            const data = { recentComments, commentCount, lastActivity };
-            
-            return docRef.update(data);
-    })
-    .catch(e => {
-        console.log(e);
-    })
-})
-
-
 exports.aggregateCommentLikes = functions.region("australia-southeast1").firestore
     .document("{collectionId}/{documentId}/comments/{commentId}/likes/{likeId}")
     .onWrite((change, context) => {
@@ -340,18 +236,16 @@ exports.createExercise = functions.region("australia-southeast1").runWith({ time
     const user = data.user;
     const userId = context.auth.uid;
     
-    exerciseForm.createdBy = {id: userId, username: user.username, profilePhoto: user.profilePhotoUrl};
+    exerciseForm.createdBy = { id: userId, username: user.username, profilePhoto: user.profilePhoto };
     exerciseForm.createdAt = new Date();
     exerciseForm.lastActivity = exerciseForm.createdAt;
-    exerciseForm.recentComments = [];
 
-    exerciseForm.suggestedSets.forEach (s => {
-        delete s.id;
-        s.measureAmount = Number(s.measureAmount);
-    })
-
-    if (exerciseForm.imgPaths.length == 0) {
+    if (exerciseForm.filePaths.length == 0) {
         throw new functions.https.HttpsError("invalid-argument", "No images included.");
+    }
+
+    if (!exerciseForm.description) {
+        throw new functions.https.HttpsError("invalid-argument", "No description included.");
     }
 
     let exerciseId = '';
