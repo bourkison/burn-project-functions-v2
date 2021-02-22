@@ -2,6 +2,7 @@ const functions = require("firebase-functions");
 const firebase_tools = require("firebase-tools");
 const admin = require("firebase-admin");
 const { HttpsError } = require("firebase-functions/lib/providers/https");
+const { consoleUrl } = require("firebase-tools/lib/utils");
 // const algoliasearch = require("algoliasearch");
 
 const project = process.env.GCLOUD_PROJECT;
@@ -22,29 +23,6 @@ let generateId = function(n) {
     }
     return id;
 }
-
-exports.aggregateCommentLikes = functions.region("australia-southeast1").firestore
-    .document("{collectionId}/{documentId}/comments/{commentId}/likes/{likeId}")
-    .onWrite((change, context) => {
-    
-    const collectionId = context.params.collectionId;
-    const documentId = context.params.documentId;
-    const commentId = context.params.commentId;
-
-    const docRef = admin.firestore().collection(collectionId).doc(documentId).collection("comments").doc(commentId);
-
-    console.log("This is the collection:", collectionId);
-
-    return docRef.collection("likes").orderBy("createdAt", "desc")
-        .get()
-        .then(querySnapshot => {
-
-        const likeCount = querySnapshot.size;
-        
-        const data = { likeCount }
-        return docRef.update(data);
-    })
-})
     
 // Deleting Exercises and Workouts is too intensive on the client end (as all comments, 
 // likes and follows must be deleted too), so we do it on server side.
@@ -152,13 +130,12 @@ exports.createWorkout = functions.region("australia-southeast1").runWith({ timeo
     // Check the workoutForm has been filled out correctly.
     if (workoutForm.exercises.length == 0) {
         console.warn("Tried to upload workout without exercises");
-        throw new functions.https.HttpsError("invalid-argument", "No exercises included in workout!");
+        throw new functions.https.HttpsError("invalid-argument", "Workout must include exercises");
     }
 
     workoutForm.createdAt = new Date();
     workoutForm.lastActivity = workoutForm.createdAt;
-    workoutForm.createdBy = { id: userId, username: user.username, profilePhoto: user.profilePhotoUrl };
-    workoutForm.recentComments = [];
+    workoutForm.createdBy = { id: userId, username: user.username, profilePhoto: user.profilePhoto };
 
     // Build the ID.
     let workoutId = '';
@@ -195,7 +172,44 @@ exports.createWorkout = functions.region("australia-southeast1").runWith({ timeo
         console.error("Error creating workout", e, "workout ID:", workoutId);
         throw new functions.https.HttpsError("unknown", "Error creating workout");
     })
+})
 
+
+exports.editWorkout = functions.region("australia-southeast1").runWith({ timeoutSeconds: 30 })
+    .https.onCall((data, context) => {
+
+    const workoutForm = data.workoutForm;
+    const workoutId = workoutForm.id;
+    
+    workoutForm.lastActivity = new Date();
+
+    // Check if workout form has been filled out correctly.
+    if (!workoutForm.name) {
+        throw new functions.https.HttpsError("invalid-argument", "Workout must have a name");
+    } else if (!workoutForm.description) {
+        throw new functions.https.HttpsError("invalid-argument", "Workout must have a description");
+    } else if (workoutForm.exercises.length == 0) {
+        throw new functions.https.HttpsError("invalid-argument", "Workout must include exercises");
+    }
+
+    delete workoutForm.id;
+
+    // Pull current workout to see createdBy accurately.
+    return admin.firestore().collection("workouts").doc(workoutId).get()
+    .then(workoutDoc => {
+        if (context.auth.uid !== workoutDoc.data().createdBy.id) {
+            throw new functions.https.HttpsError("permission-denied", "User does not have permissions to edit this workout.");
+        }
+
+        return admin.firestore().collection("workouts").doc(workoutId).update(workoutForm)
+    })
+    .then(() => {
+        return { id: workoutId }
+    })
+    .catch(e => {
+        console.error("Error updating workout:", e);
+        throw new functions.https.HttpsError("unknown", "Error updating workout");
+    })
 })
 
 
@@ -208,6 +222,8 @@ exports.createUser = functions.region("australia-southeast1").runWith({ timeoutS
 
     userForm.createdAt = new Date();
     userForm.lastActivty = userForm.createdAt;
+    userForm.followerCount = 0;
+    userForm.followingCount = 0;
 
     if (!userForm.username) {
         throw new HttpsError("invalid-argument", "Must include a username.");
@@ -233,8 +249,11 @@ exports.createExercise = functions.region("australia-southeast1").runWith({ time
     .https.onCall((data, context) => {
 
     const exerciseForm = data.exerciseForm;
+    const exerciseId = exerciseForm.id;
     const user = data.user;
     const userId = context.auth.uid;
+
+    delete exerciseForm.id
     
     exerciseForm.createdBy = { id: userId, username: user.username, profilePhoto: user.profilePhoto };
     exerciseForm.createdAt = new Date();
@@ -247,13 +266,6 @@ exports.createExercise = functions.region("australia-southeast1").runWith({ time
     if (!exerciseForm.description) {
         throw new functions.https.HttpsError("invalid-argument", "No description included.");
     }
-
-    let exerciseId = '';
-    exerciseId += exerciseForm.name.replace(/[^A-Za-z0-9]/g, "").substring(0, 8).toLowerCase();
-    if (exerciseId.length > 0) {
-        exerciseId += '-';
-    }
-    exerciseId += generateId(16 - exerciseId.length);
 
     const batch = admin.firestore().batch();
 
@@ -284,22 +296,64 @@ exports.createExercise = functions.region("australia-southeast1").runWith({ time
 })
 
 
+
+exports.editExercise = functions.region("australia-southeast1").runWith({ timeoutSeconds: 30 })
+    .https.onCall((data, context) => {
+
+    const exerciseForm = data.exerciseForm;
+    const exerciseId = exerciseForm.id;
+
+    exerciseForm.lastActivity = new Date();
+
+    // Check if the form is filled out correctly.
+    if (!exerciseForm.name) {
+        throw new functions.https.HttpsError("invalid-argument", "Exercise must have a name");
+    } else if (!exerciseForm.description) {
+        throw new functions.https.HttpsError("invalid-argument", "Exercise must have a description");
+    } else if (exerciseForm.filePaths.length === 0) {
+        throw new functions.https.HttpsError("invalid-argument", "Exercise must have either images/files");
+    }
+
+    delete exerciseForm.id;
+
+    // Pull current iteration of the exercise to pull createdBy accurately (in case exerciseForm has been tampered).
+    return admin.firestore().collection("exercises").doc(exerciseId).get()
+    .then(exerciseDoc => {
+        console.log("Downloaded the exercise for reference check:", exerciseDoc.data().createdBy.id);
+
+        if (context.auth.uid !== exerciseDoc.data().createdBy.id) {
+            throw new functions.https.HttpsError("permission-denied", "User does not have permissions to edit this exercise");
+        }
+
+        return admin.firestore().collection("exercises").doc(exerciseId).update(exerciseForm)
+    })
+    .then(() => {
+        return { id: exerciseId }
+    })
+    .catch(e => {
+        console.error("Error updating exercise", e);
+        throw new functions.https.HttpsError("unknown", "Error updating exercise");
+    })
+})
+
+
+
 exports.createPost = functions.region("australia-southeast1").runWith({ timeoutSeconds: 30 })
     .https.onCall((data, context) => {
 
     const postForm = data.postForm;
+    const postId = data.postForm.id;
     const user = data.user;
     const userId = context.auth.uid;
+
+    delete postForm.id
 
     if (!postForm.content) {
         throw new functions.https.HttpsError("invalid-argument", "Post must have content");
     }
 
-    postForm.createdBy = { id: userId, username: user.username, profilePhoto: user.profilePhotoUrl };
+    postForm.createdBy = { id: userId, username: user.username, profilePhoto: user.profilePhoto };
     postForm.createdAt = new Date();
-    postForm.recentComments = [];
-
-    const postId = generateId(16);
 
     const batch = admin.firestore().batch();
 
