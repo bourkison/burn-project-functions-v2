@@ -1,9 +1,7 @@
 const functions = require("firebase-functions");
 const firebase_tools = require("firebase-tools");
 const admin = require("firebase-admin");
-const { HttpsError } = require("firebase-functions/lib/providers/https");
-const { consoleUrl } = require("firebase-tools/lib/utils");
-// const algoliasearch = require("algoliasearch");
+const algoliasearch = require("algoliasearch");
 
 const project = process.env.GCLOUD_PROJECT;
 const token = functions.config().ci_token;
@@ -13,6 +11,8 @@ const numShards = 10;
 admin.initializeApp({
     storageBucket: "burn-project-f8493.appspot.com"
 });
+
+const algoliaClient = algoliasearch(functions.config().algolia.appid, functions.config().algolia.apikey);
 
 let generateId = function(n) {
     let randomChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
@@ -226,7 +226,7 @@ exports.createUser = functions.region("australia-southeast1").runWith({ timeoutS
     userForm.followingCount = 0;
 
     if (!userForm.username) {
-        throw new HttpsError("invalid-argument", "Must include a username.");
+        throw new functions.https.HttpsError("invalid-argument", "Must include a username.");
     }
 
     return admin.firestore().collection("users").where("username", "==", userForm.username).get()
@@ -259,6 +259,8 @@ exports.createExercise = functions.region("australia-southeast1").runWith({ time
     exerciseForm.createdAt = new Date();
     exerciseForm.lastActivity = exerciseForm.createdAt;
 
+    const record = { objectID: exerciseId, name: exerciseForm.name }
+
     if (exerciseForm.filePaths.length == 0) {
         throw new functions.https.HttpsError("invalid-argument", "No images included.");
     }
@@ -286,7 +288,12 @@ exports.createExercise = functions.region("australia-southeast1").runWith({ time
 
     return batch.commit()
     .then(() => {
-        console.log("Exercise created at:", exerciseId);
+        console.log("Exercise created at:", exerciseId, "Now building Algolia index.");
+        const algoliaExerciseIndex = algoliaClient.initIndex("exercises");
+        return algoliaExerciseIndex.saveObject(record);
+    })
+    .then(() => {
+        console.log("Algolia record created sucessfully.");
         return { id: exerciseId };
     })
     .catch(e => {
