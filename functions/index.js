@@ -145,6 +145,8 @@ exports.createWorkout = functions.region("australia-southeast1").runWith({ timeo
     }
     workoutId += generateId(16 - workoutId.length);
 
+    const record = { objectID: workoutId, name: workoutForm.name };
+
     const batch = admin.firestore().batch();
 
     // First create in workouts collection.
@@ -165,7 +167,10 @@ exports.createWorkout = functions.region("australia-southeast1").runWith({ timeo
     // Commit the batch.
     return batch.commit()
     .then(() => {
-        console.log("Workout created at:", workoutId);
+        const algoliaWorkoutIndex = algoliaClient.initIndex("workouts");
+        return algoliaWorkoutIndex.saveObject(record);
+    })
+    .then(() => {
         return { id: workoutId };
     })
     .catch(e => {
@@ -288,12 +293,10 @@ exports.createExercise = functions.region("australia-southeast1").runWith({ time
 
     return batch.commit()
     .then(() => {
-        console.log("Exercise created at:", exerciseId, "Now building Algolia index.");
         const algoliaExerciseIndex = algoliaClient.initIndex("exercises");
         return algoliaExerciseIndex.saveObject(record);
     })
     .then(() => {
-        console.log("Algolia record created sucessfully.");
         return { id: exerciseId };
     })
     .catch(e => {
