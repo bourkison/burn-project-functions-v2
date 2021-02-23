@@ -473,20 +473,19 @@ exports.addNewPostToFeeds = functions.region("australia-southeast1").firestore.d
     .onCreate((postSnapshot, context) => {
 
     // Don't need to push to this user's feed, as we do that on create.
-    // const userId = context.auth.uid;
-    
+    const userId = context.auth.uid;
     const postId = context.params.postId;
     const createdAt = postSnapshot.data().createdAt;
 
     // First retrieve user's followers.
     return admin.firestore().collection("users").doc(userId).collection("followers").get()
-    .then(followerSnapshots => {
+    .then(followerSnapshot => {
         let feedPromises = [];
-        const payload = { createdAt: createdAt };
+        const payload = { createdAt: createdAt, createdBy: context.auth.uid };
 
-        followerSnapshots.forEach(followerSnapshot => {
+        followerSnapshot.forEach(followerDoc => {
             // For each follower, push this to their feed.
-            const followerId = followerSnapshot.id;
+            const followerId = followerDoc.id;
             feedPromises.push(admin.firestore().collection("users").doc(followerId).collection("feed").doc(postId).set(payload));
         })
 
@@ -505,15 +504,16 @@ exports.addUsersPostsToFeed = functions.region("australia-southeast1").firestore
     const followingId = context.params.followingId;
 
     // First retrieve the users posts.
-    return admin.firestore.collection("users").doc(followingId).collection("posts").get()
+    return admin.firestore().collection("users").doc(followingId).collection("posts").get()
     .then(postSnapshots => {
         let feedPromises = [];
 
         // For each post, push this to the users feed.
-        postSnapshots.forEach(postSnapshot => {
-            const payload = { createdBy: postSnapshot.data().createdBy };
+        postSnapshots.forEach(postDoc => {
+            const payload = { createdAt: postDoc.data().createdAt, createdBy: followingId };
 
-            feedPromises.push(admin.firestore().collection("users").doc(userId).collection("feed").doc(postSnapshot.id).set(payload));
+            console.log("Pushing post:", postDoc.id, "to user:", userId);
+            feedPromises.push(admin.firestore().collection("users").doc(userId).collection("feed").doc(postDoc.id).set(payload));
         })
 
         return Promise.all(feedPromises);
@@ -521,5 +521,28 @@ exports.addUsersPostsToFeed = functions.region("australia-southeast1").firestore
     .catch(e => {
         console.error("Error sending new followers posts to feed:", e);
     })
+})
 
+
+// This is fired on unfollow, and removes all unfollowed user's posts from user.
+exports.removeUsersPostsFromFeed = functions.region("australia-southeast1").firestore.document("/users/{userId}/following/{followingId}")
+    .onDelete((followSnapshot, context) => {
+
+    const userId = context.params.userId;
+    const followingId = context.params.followingId;
+
+    // First retrieve feed documents where createdBy is the unfollowed user.
+    return admin.firestore().collection("users").doc(userId).collection("feed").where("createdBy", "==", followingId).get()
+    .then(feedSnapshot => {
+        let feedPromises = [];
+
+        feedSnapshot.forEach(feedDoc => {
+            feedPromises.push(feedDoc.ref.delete());
+        })
+
+        return Promise.all(feedPromises);
+    })
+    .catch(e => {
+        console.error("Error deleting posts from feed:", e);
+    })
 })
