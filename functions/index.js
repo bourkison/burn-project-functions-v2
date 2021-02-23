@@ -400,10 +400,15 @@ exports.createPost = functions.region("australia-southeast1").runWith({ timeoutS
         createdAt: postForm.createdAt
     });
 
+    // Build counter shards for this post.
     for (let i = 0; i < numShards; i++) {
         const shardRef = admin.firestore().collection("posts").doc(postId).collection("counters").doc(i.toString());
         batch.set(shardRef, { likeCount: 0, commentCount: 0 });
     }
+
+    // Push this post to the user's feed.
+    let feedPayload = { createdAt: postForm.createdAt }
+    batch.set(admin.firestore().collection("users").doc(userId).collection("feed").doc(postId), feedPayload);
 
     return batch.commit()
     .then(() => {
@@ -463,5 +468,58 @@ exports.buildFeed = functions.region("australia-southeast1").runWith({ timeoutSe
     })
 })
 
+// This is fired on create of a new post, and pushes this new post to all the followers' feed.
+exports.addNewPostToFeeds = functions.region("australia-southeast1").firestore.document("/posts/{postId}")
+    .onCreate((postSnapshot, context) => {
 
-// ALGOLIA
+    // Don't need to push to this user's feed, as we do that on create.
+    // const userId = context.auth.uid;
+    
+    const postId = context.params.postId;
+    const createdAt = postSnapshot.data().createdAt;
+
+    // First retrieve user's followers.
+    return admin.firestore().collection("users").doc(userId).collection("followers").get()
+    .then(followerSnapshots => {
+        let feedPromises = [];
+        const payload = { createdAt: createdAt };
+
+        followerSnapshots.forEach(followerSnapshot => {
+            // For each follower, push this to their feed.
+            const followerId = followerSnapshot.id;
+            feedPromises.push(admin.firestore().collection("users").doc(followerId).collection("feed").doc(postId).set(payload));
+        })
+
+        return Promise.all(feedPromises);
+    })
+    .catch(e => {
+        console.error("Error building followers feeds", e);
+    })
+})
+
+// This is done on new follow, and pushes the followed users posts to the following user.
+exports.addUsersPostsToFeed = functions.region("australia-southeast1").firestore.document("/users/{userId}/following/{followingId}")
+    .onCreate((followSnapshot, context) => {
+
+    const userId = context.params.userId;
+    const followingId = context.params.followingId;
+
+    // First retrieve the users posts.
+    return admin.firestore.collection("users").doc(followingId).collection("posts").get()
+    .then(postSnapshots => {
+        let feedPromises = [];
+
+        // For each post, push this to the users feed.
+        postSnapshots.forEach(postSnapshot => {
+            const payload = { createdBy: postSnapshot.data().createdBy };
+
+            feedPromises.push(admin.firestore().collection("users").doc(userId).collection("feed").doc(postSnapshot.id).set(payload));
+        })
+
+        return Promise.all(feedPromises);
+    })
+    .catch(e => {
+        console.error("Error sending new followers posts to feed:", e);
+    })
+
+})
