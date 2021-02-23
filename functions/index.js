@@ -259,7 +259,7 @@ exports.createUser = functions.region("australia-southeast1").runWith({ timeoutS
         return algoliaUserIndex.saveObject(record);
     })
     .then(() => {
-        return { userId }
+        return { id: userId };
     })
     .catch(e => {
         console.error("Error creating user", e, "user ID:", userId);
@@ -356,7 +356,14 @@ exports.editExercise = functions.region("australia-southeast1").runWith({ timeou
         return admin.firestore().collection("exercises").doc(exerciseId).update(exerciseForm)
     })
     .then(() => {
-        return { id: exerciseId }
+        if (data.updateAlgolia) {
+            const record = { objectID: exerciseId, name: exerciseForm.name }
+            const algoliaExerciseIndex = algoliaClient.initIndex("exercises");
+            return algoliaExerciseIndex.partialUpdateObject(record);
+        }
+    })
+    .then(() => {
+        return { id: exerciseId };
     })
     .catch(e => {
         console.error("Error updating exercise", e);
