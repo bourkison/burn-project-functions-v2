@@ -209,6 +209,14 @@ exports.editWorkout = functions.region("australia-southeast1").runWith({ timeout
         return admin.firestore().collection("workouts").doc(workoutId).update(workoutForm)
     })
     .then(() => {
+        if (data.updateAlgolia) {
+            console.log("Updating algolia...");
+            const record = { objectID: workoutId, name: workoutForm.name }
+            const algoliaWorkoutIndex = algoliaClient.initIndex("workouts");
+            return algoliaWorkoutIndex.partialUpdateObject(record)
+        }
+    })
+    .then(() => {
         return { id: workoutId }
     })
     .catch(e => {
@@ -230,6 +238,8 @@ exports.createUser = functions.region("australia-southeast1").runWith({ timeoutS
     userForm.followerCount = 0;
     userForm.followingCount = 0;
 
+    const record = { objectID: userId, username: userForm.username, firstName: userForm.firstName, surname: userForm.surname, profilePhoto: userForm.profilePhoto };
+
     if (!userForm.username) {
         throw new functions.https.HttpsError("invalid-argument", "Must include a username.");
     }
@@ -245,7 +255,15 @@ exports.createUser = functions.region("australia-southeast1").runWith({ timeoutS
         }
     })
     .then(() => {
+        const algoliaUserIndex = algoliaClient.initIndex("users");
+        return algoliaUserIndex.saveObject(record);
+    })
+    .then(() => {
         return { userId }
+    })
+    .catch(e => {
+        console.error("Error creating user", e, "user ID:", userId);
+        throw new functions.https.HttpsError("unknown", "Error creating user");
     })
 })
 
